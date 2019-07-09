@@ -45,7 +45,13 @@ func main() {
 	broker := os.Args[1]
 	topic := os.Args[2]
 
-	conf := kafka.ConfigMap{"bootstrap.servers": broker}
+	// Fail quickly for the sake of this demo.
+	const messageTimeoutMs = 5000
+
+	conf := kafka.ConfigMap{
+		"bootstrap.servers":  broker,
+		"message.timeout.ms": messageTimeoutMs,
+	}
 
 	p, err := kafka.NewProducer(&conf)
 	if err != nil {
@@ -55,17 +61,24 @@ func main() {
 
 	tp := kafka.TopicPartition{Topic: &topic, Partition: kafka.PartitionAny}
 
-	// Go-routine for handling delivery reports
+	// Go-routine for handling delivery reports and client error events.
 	go func(drs chan kafka.Event) {
 		for ev := range drs {
-			m, ok := ev.(*kafka.Message)
-			if !ok {
-				continue
-			}
-			if m.TopicPartition.Error != nil {
-				fmt.Fprintf(os.Stderr, "%% Delivery error: %v\n", m.TopicPartition)
-			} else {
-				fmt.Fprintf(os.Stderr, "%% Delivered %v\n", m)
+			switch e := ev.(type) {
+			case *kafka.Message:
+				if e.TopicPartition.Error != nil {
+					fmt.Fprintf(os.Stderr, "%% Delivery error: %v\n", e.TopicPartition)
+				} else {
+					fmt.Fprintf(os.Stderr, "%% Delivered %v\n", e)
+				}
+
+			case kafka.Error:
+				// Errors are typically informational, the
+				// client will attempt to automatically recover.
+				fmt.Fprintf(os.Stderr, "%% Error: %v\n", e)
+
+			default:
+				fmt.Fprintf(os.Stderr, "%% Unhandled event %T ignored: %v\n", e, e)
 			}
 		}
 	}(p.Events())
@@ -117,7 +130,12 @@ func main() {
 	}
 
 	fmt.Fprintf(os.Stderr, "%% Flushing %d message(s)\n", p.Len())
-	p.Flush(10000)
-	fmt.Fprintf(os.Stderr, "%% Closing\n")
+	remaining := p.Flush(messageTimeoutMs + 1000)
+	if remaining > 0 {
+		fmt.Fprintf(os.Stderr,
+			"%% Exiting with %d message(s) still in queue/transit\n",
+			remaining)
+	}
+
 	p.Close()
 }
