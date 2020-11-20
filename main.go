@@ -20,7 +20,7 @@ package main
 import (
 	"bufio"
 	"fmt"
-	"github.com/confluentinc/confluent-kafka-go-dev/kafka"
+	"github.com/confluentinc/confluent-kafka-go/kafka"
 	"os"
 	"os/signal"
 	"strings"
